@@ -2,7 +2,7 @@
 const models = require('../models');
 
 // get the Cat model
-const { Cat } = models;
+const { Cat,Dog } = models;
 
 // Function to handle rendering the index page.
 const hostIndex = async (req, res) => {
@@ -99,6 +99,55 @@ const hostPage2 = (req, res) => {
 const hostPage3 = (req, res) => {
   res.render('page3');
 };
+
+// Function for rendering the page1 template
+// Page4 has a loop that iterates over an array of dogs
+const hostPage4 = async (req, res) => {
+  /* Remember that our database is an entirely separate server from our node
+     code. That means all interactions with it are async, and just because our
+     server is up doesn't mean our database is. Therefore, any time we
+     interact with it, we need to account for scenarios where it is not working.
+     That is why the code below is wrapped in a try/catch statement.
+  */
+  try {
+    /* We want to find all the cats in the Cat database. To do this, we need
+       to make a "query" or a search. Queries in Mongoose are "thenable" which
+       means they work like promises. Since they work like promises, we can also
+       use await/async with them.
+
+       The result of any query will either throw an error, or return zero, one, or
+       multiple "documents". Documents are what our database stores. It is often
+       abbreviated to "doc" or "docs" (one or multiple).
+
+       .find() is a function in all Mongoose models (like our Cat model). It takes
+       in an object as a parameter that defines the search. In this case, we want
+       to find every cat, so we give it an empty object because that will not filter
+       out any cats.
+
+       .lean() is a modifier for the find query. Instead of returning entire mongoose
+       documents, .lean() will only return the JS Objects being stored. Try printing
+       out docs with and without .lean() to see the difference.
+
+       .exec() executes the chain of operations. It is not strictly necessary and
+       can be removed. However, mongoose gives better error messages if we use it.
+    */
+    const docs = await Dog.find({}).lean().exec();
+
+    // Once we get back the docs array, we can send it to page1.
+    return res.render('page4', { dogs: docs });
+  } catch (err) {
+    /* If our database returns an error, or is unresponsive, we will print that error to
+       our console for us to see. We will also send back an error message to the client.
+
+       We don't want to send back the err from mongoose, as that would be unsafe. You
+       do not want people to see actual error messages from your server or database, or else
+       they can exploit them to attack your server.
+    */
+    console.log(err);
+    return res.status(500).json({ error: 'failed to find dogs' });
+  }
+};
+
 
 // Get name will return the name of the last added cat.
 const getName = async (req, res) => {
@@ -276,6 +325,102 @@ const updateLast = (req, res) => {
   });
 };
 
+const setDog = async (req, res) => {
+  
+  if (!req.body.firstname || !req.body.lastname || !req.body.breed || !req.body.age) {
+    // If they are missing data, send back an error.
+    return res.status(400).json({ error: 'firstname, lastname, breed and age  are all required' });
+  }
+
+  
+  const dogData = {
+    name: `${req.body.firstname} ${req.body.lastname}`,
+    breed: req.body.breed,
+    age: req.body.age,
+  };
+
+  
+  const newDog = new Dog(dogData);
+
+ 
+  try {
+    
+    await newDog.save();
+    return res.status(201).json({
+      name: newDog.name,
+      breed: newDog.breed,
+      age: newDog.age
+    });
+  } catch (err) {
+   
+    console.log(err);
+    return res.status(500).json({ error: 'failed to create dog' });
+  }
+};
+
+const updateAge = (req, res) => {
+  /* We want to increase the number of beds owned by the most recently added cat.
+     To accomplish this we need to use the findOneAndUpdate function. The first
+     parameter is the query. Since we need to sort the results to find the most
+     recently added cat we want an empty query so that it can find all of the cats.
+
+     The second parameter is the actual update. Usually this would just be an unnested
+     object like {'bedsOwned': 1}. However this will set the cat's bedsowned to 1, not
+     increase it. So instead we need to use the Mongo macro $inc as a key to another
+     object. Essentially this says "everything defined in this subobject is an increment
+     not a set". So {$inc: {'bedsOwned': 1}} says "increase the beds owned by 1".
+
+     Finally, findOneAndUpdate would just update the most recent cat it finds that
+     matches the query (which could be any cat). So we also need to tell Mongoose to
+     sort all the cats in descending order by created date so that we update the
+     most recently added one. The returnDocument key with the 'after' value tells 
+     mongoose to give us back the version of the document AFTER the changes. Otherwise
+     it will default to 'before' which gives us the document before the update.
+
+     We can use async/await for this, or just use standard promise .then().catch() syntax.
+  */
+
+     
+  if (!req.body.firstname || !req.body.lastname) {
+    // If they are missing data, send back an error.
+    return res.status(400).json({ error: 'first and last name are required' });
+  }
+
+  let doc;
+  try {
+  
+    doc = Dog.findOneAndUpdate({name:`${req.body.firstname} ${req.body.lastname}`}, {$inc: {'age': 1}}, {
+      returnDocument: 'after', //Populates doc in the .then() with the version after update
+      sort: {'createdDate': 'descending'}
+    }).lean().exec();
+
+  } catch (err) {
+    // If there is an error, log it and send the user an error message.
+    console.log(err);
+    return res.status(500).json({ error: 'Something went wrong' });
+  }
+
+  // If we do not find something that matches our search, doc will be empty.
+  if (!doc) {
+    return res.status(404).json({ error: 'No dog found' });
+  }
+
+  
+
+  // If we successfully save/update them in the database, send back the dog's info.
+  doc.then((dc) => res.json({
+    name: dc.name,    
+    bedsOwned: dc.breed,
+    age: dc.age,
+  }));
+
+  // If something goes wrong saving to the database, log the error and send a message to the client.
+  doc.catch((err) => {
+    console.log(err);
+    return res.status(500).json({ error: 'Something went wrong' });
+  });
+};
+
 // A function to send back the 404 page.
 const notFound = (req, res) => {
   res.status(404).render('notFound', {
@@ -289,9 +434,12 @@ module.exports = {
   page1: hostPage1,
   page2: hostPage2,
   page3: hostPage3,
+  page4: hostPage4,
   getName,
   setName,
   updateLast,
   searchName,
   notFound,
+  setDog,
+  updateAge,
 };
